@@ -5,6 +5,7 @@ import pydeck as pdk
 import random
 import requests
 import time
+from streamlit_geolocation import streamlit_geolocation
 from models import Driver, Passenger
 from matcher import MatchingEngine
 
@@ -40,18 +41,45 @@ if "road_distance" not in st.session_state:
     st.session_state.road_distance = None
 if "road_time" not in st.session_state:
     st.session_state.road_time = None
+if "center_lat" not in st.session_state:
+    st.session_state.center_lat = 19.0760  # Default fallback
+if "center_lon" not in st.session_state:
+    st.session_state.center_lon = 72.8777
+
+
+# -------------------------
+# GET LIVE BROWSER LOCATION
+# -------------------------
+st.header("Passenger Ride Request")
+st.write("📍 **Step 1: Get your live location**")
+location = streamlit_geolocation()
+
+# If the browser successfully grabs the GPS location
+if location and location.get('latitude') is not None and location.get('longitude') is not None:
+    # Check if the location is new (prevents resetting on every single app refresh)
+    if round(st.session_state.center_lat, 4) != round(location['latitude'], 4):
+        st.session_state.center_lat = location['latitude']
+        st.session_state.center_lon = location['longitude']
+        
+        # Reset the matching engine to clear old drivers and spawn new ones here
+        st.session_state.engine = MatchingEngine()
+        st.session_state.best_driver = None
+        st.session_state.passenger = None
+        st.session_state.route_coords = None
+        st.session_state.message = "Location updated! New drivers have been spawned near you."
 
 engine = st.session_state.engine
 
 
 # -------------------------
-# CREATE 5 DEFAULT DRIVERS
+# CREATE 5 LOCAL DRIVERS
 # -------------------------
 if len(engine.drivers) < 5:
-    base_lat = 19.0760
-    base_lon = 72.8777
+    base_lat = st.session_state.center_lat
+    base_lon = st.session_state.center_lon
 
     for i in range(1, 6):
+        # Spawn drivers dynamically around whatever the center location is
         lat = base_lat + random.uniform(-0.02, 0.02)
         lon = base_lon + random.uniform(-0.02, 0.02)
 
@@ -69,21 +97,17 @@ if len(engine.drivers) < 5:
 # GET ROAD ROUTE FUNCTION
 # -------------------------
 def get_road_route(start, end):
-
     url = "https://api.openrouteservice.org/v2/directions/driving-car"
-
     headers = {
         "Authorization": ORS_API_KEY,
         "Content-Type": "application/json"
     }
-
     body = {
         "coordinates": [
             [start[1], start[0]],
             [end[1], end[0]]
         ]
     }
-
     response = requests.post(url, json=body, headers=headers)
 
     if response.status_code != 200:
@@ -91,7 +115,6 @@ def get_road_route(start, end):
         return None, None, None
 
     data = response.json()
-
     coords = data["features"][0]["geometry"]["coordinates"]
     distance_km = data["features"][0]["properties"]["summary"]["distance"] / 1000
     duration_min = data["features"][0]["properties"]["summary"]["duration"] / 60
@@ -102,11 +125,12 @@ def get_road_route(start, end):
 # -------------------------
 # PASSENGER INPUT
 # -------------------------
-st.header("Passenger Ride Request")
-
+st.write("🚕 **Step 2: Request a Ride**")
 user_id = st.text_input("Enter User ID", value="User_1")
-pickup_lat = st.number_input("Pickup Latitude", value=19.0760, format="%.6f")
-pickup_lon = st.number_input("Pickup Longitude", value=72.8777, format="%.6f")
+
+# Inputs default to the live location we fetched above
+pickup_lat = st.number_input("Pickup Latitude", value=st.session_state.center_lat, format="%.6f")
+pickup_lon = st.number_input("Pickup Longitude", value=st.session_state.center_lon, format="%.6f")
 
 if st.button("Request Ride"):
     passenger = Passenger(user_id, pickup_lat, pickup_lon)
@@ -116,7 +140,6 @@ if st.button("Request Ride"):
     st.session_state.best_driver = best_driver
     st.session_state.message = message
 
-    # Fetch route ONCE from Driver -> Passenger and store in session
     if best_driver:
         try:
             route_coords, road_distance, road_time = get_road_route(
@@ -140,10 +163,8 @@ live_track = st.checkbox("Enable Live Location Tracking", value=st.session_state
 st.session_state.live_tracking = live_track
 
 if live_track:
-    # Update drivers
     for d_id, d in engine.drivers.items():
         if st.session_state.best_driver and d.id == st.session_state.best_driver.id:
-            # Move assigned driver along the exact fetched route
             coords = st.session_state.route_coords
             idx = st.session_state.route_index
             if coords and idx < len(coords):
@@ -151,15 +172,12 @@ if live_track:
                 engine.update_location(d.id, new_lat, new_lon)
                 st.session_state.route_index += 1
         else:
-            # Random drift for unassigned drivers
             new_lat = d.location[0] + random.uniform(-0.0005, 0.0005)
             new_lon = d.location[1] + random.uniform(-0.0005, 0.0005)
             engine.update_location(d.id, new_lat, new_lon)
 
-    # Move passenger continuously to simulate GPS shifts / walking
     if st.session_state.passenger:
         p = st.session_state.passenger
-        # Slightly larger drift so the user movement is clearly visible
         new_p_lat = p.location[0] + random.uniform(-0.0002, 0.0002)
         new_p_lon = p.location[1] + random.uniform(-0.0002, 0.0002)
         p.update_location(new_p_lat, new_p_lon)
@@ -172,7 +190,6 @@ driver_data = []
 user_data = []
 route_path = []
 
-# Prepare Driver Icons
 for d in engine.drivers.values():
     driver_data.append({
         "lat": d.location[0],
@@ -185,8 +202,6 @@ for d in engine.drivers.values():
         }
     })
 
-# Prepare Passenger Icon (ALWAYS VISIBLE NOW)
-# If tracking has started, use live location. Otherwise, use input location.
 current_p_lat = st.session_state.passenger.location[0] if st.session_state.passenger else pickup_lat
 current_p_lon = st.session_state.passenger.location[1] if st.session_state.passenger else pickup_lon
 
@@ -205,7 +220,6 @@ user_data.append({
 # IF RIDE ASSIGNED
 # -------------------------
 if st.session_state.best_driver and st.session_state.passenger:
-    # Draw the remaining route on the map
     if st.session_state.route_coords:
         remaining_route = st.session_state.route_coords[st.session_state.route_index:]
         if len(remaining_route) > 1:
@@ -247,7 +261,6 @@ route_layer = pdk.Layer(
     get_color=[255, 0, 0],
 )
 
-# Center the map dynamically
 view_state = pdk.ViewState(
     latitude=current_p_lat,
     longitude=current_p_lon,
@@ -277,3 +290,4 @@ if st.session_state.message:
 if st.session_state.live_tracking:
     time.sleep(0.5) 
     st.rerun()
+    
