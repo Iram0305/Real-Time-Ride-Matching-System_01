@@ -1,14 +1,17 @@
+# app.py
+
 import streamlit as st
 import pydeck as pdk
 import random
 import requests
+import time
 from models import Driver, Passenger
 from matcher import MatchingEngine
 
 st.set_page_config(page_title="Road-Based Ride Matching", layout="wide")
 
 st.title("🚖 Real-Time Road-Based Ride Matching System")
-st.write("KD-Tree + Priority Queue + Road Routing Engine")
+st.write("KD-Tree + Priority Queue + Road Routing Engine with Live Tracking")
 
 # -------------------------
 # INSERT YOUR API KEY HERE
@@ -21,12 +24,22 @@ ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI1NDI4Y2I3N
 # -------------------------
 if "engine" not in st.session_state:
     st.session_state.engine = MatchingEngine()
-
 if "best_driver" not in st.session_state:
     st.session_state.best_driver = None
-
+if "passenger" not in st.session_state:
+    st.session_state.passenger = None
 if "message" not in st.session_state:
     st.session_state.message = None
+if "route_coords" not in st.session_state:
+    st.session_state.route_coords = None
+if "route_index" not in st.session_state:
+    st.session_state.route_index = 0
+if "live_tracking" not in st.session_state:
+    st.session_state.live_tracking = False
+if "road_distance" not in st.session_state:
+    st.session_state.road_distance = None
+if "road_time" not in st.session_state:
+    st.session_state.road_time = None
 
 engine = st.session_state.engine
 
@@ -92,17 +105,67 @@ def get_road_route(start, end):
 st.header("Passenger Ride Request")
 
 user_id = st.text_input("Enter User ID", value="User_1")
-
 pickup_lat = st.number_input("Pickup Latitude", value=19.0760, format="%.6f")
 pickup_lon = st.number_input("Pickup Longitude", value=72.8777, format="%.6f")
 
 if st.button("Request Ride"):
-
     passenger = Passenger(user_id, pickup_lat, pickup_lon)
+    st.session_state.passenger = passenger
+    
     best_driver, message = engine.request_ride(passenger)
-
     st.session_state.best_driver = best_driver
     st.session_state.message = message
+
+    # Fetch route ONCE from Driver -> Passenger and store in session
+    if best_driver:
+        try:
+            route_coords, road_distance, road_time = get_road_route(
+                best_driver.location, 
+                passenger.location
+            )
+            if route_coords:
+                st.session_state.route_coords = route_coords
+                st.session_state.route_index = 0
+                st.session_state.road_distance = road_distance
+                st.session_state.road_time = road_time
+        except Exception as e:
+            st.error("Routing API failed. Check your API key or connection.")
+
+
+# -------------------------
+# LIVE TRACKING LOGIC
+# -------------------------
+st.subheader("Live Tracking Controls")
+live_track = st.checkbox("Enable Live Location Tracking", value=st.session_state.live_tracking)
+st.session_state.live_tracking = live_track
+
+if live_track:
+    # Update drivers
+    for d_id, d in engine.drivers.items():
+        if st.session_state.best_driver and d.id == st.session_state.best_driver.id:
+            # Move assigned driver along the exact fetched route
+            coords = st.session_state.route_coords
+            idx = st.session_state.route_index
+            if coords and idx < len(coords):
+                new_lon, new_lat = coords[idx]
+                engine.update_location(d.id, new_lat, new_lon)
+                st.session_state.route_index += 1
+        else:
+            # Random drift for unassigned drivers to simulate driving around
+            new_lat = d.location[0] + random.uniform(-0.0005, 0.0005)
+            new_lon = d.location[1] + random.uniform(-0.0005, 0.0005)
+            engine.update_location(d.id, new_lat, new_lon)
+
+    # Move passenger slightly to simulate mobile GPS tracking
+    if st.session_state.passenger:
+        p = st.session_state.passenger
+        new_p_lat = p.location[0] + random.uniform(-0.0001, 0.0001)
+        new_p_lon = p.location[1] + random.uniform(-0.0001, 0.0001)
+        p.update_location(new_p_lat, new_p_lon)
+
+    # Pause briefly and auto-refresh the app
+    time.sleep(1)
+    st.rerun()
 
 
 # -------------------------
@@ -124,17 +187,15 @@ for d in engine.drivers.values():
         }
     })
 
-
 # -------------------------
 # IF RIDE ASSIGNED
 # -------------------------
-if st.session_state.best_driver:
+if st.session_state.best_driver and st.session_state.passenger:
 
-    best_driver = st.session_state.best_driver
-
+    p = st.session_state.passenger
     user_data.append({
-        "lat": pickup_lat,
-        "lon": pickup_lon,
+        "lat": p.location[0],
+        "lon": p.location[1],
         "icon_data": {
             "url": "https://cdn-icons-png.flaticon.com/512/149/149071.png",
             "width": 128,
@@ -143,22 +204,17 @@ if st.session_state.best_driver:
         }
     })
 
-    try:
-        route_coords, road_distance, road_time = get_road_route(
-            (pickup_lat, pickup_lon),
-            best_driver.location
-        )
+    # Draw the remaining route on the map
+    if st.session_state.route_coords:
+        remaining_route = st.session_state.route_coords[st.session_state.route_index:]
+        if len(remaining_route) > 1:
+            route_path = [{"path": remaining_route}]
+        elif len(remaining_route) <= 1 and st.session_state.route_coords:
+            st.success("Driver has arrived at your location!")
 
-        # Convert to PathLayer format
-        route_path = [
-            {"path": route_coords}
-        ]
-
-        st.info(f"🚗 Road Distance: {round(road_distance, 2)} km")
-        st.info(f"⏱ Estimated Time: {round(road_time, 1)} minutes")
-
-    except:
-        st.error("Routing API failed. Check your API key.")
+    if st.session_state.road_distance is not None:
+        st.info(f"🚗 Initial Road Distance: {round(st.session_state.road_distance, 2)} km")
+        st.info(f"⏱ Initial Estimated Time: {round(st.session_state.road_time, 1)} minutes")
 
 
 # -------------------------
@@ -190,11 +246,14 @@ route_layer = pdk.Layer(
     get_color=[255, 0, 0],
 )
 
+# Dynamically set viewstate to passenger if tracking, else default pickup
+center_lat = st.session_state.passenger.location[0] if st.session_state.passenger else pickup_lat
+center_lon = st.session_state.passenger.location[1] if st.session_state.passenger else pickup_lon
 
 view_state = pdk.ViewState(
-    latitude=pickup_lat,
-    longitude=pickup_lon,
-    zoom=12,
+    latitude=center_lat,
+    longitude=center_lon,
+    zoom=13,
 )
 
 deck = pdk.Deck(
