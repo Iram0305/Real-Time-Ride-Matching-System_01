@@ -133,7 +133,7 @@ if st.button("Request Ride"):
 
 
 # -------------------------
-# LIVE TRACKING LOGIC (Math Only)
+# LIVE TRACKING LOGIC
 # -------------------------
 st.subheader("Live Tracking Controls")
 live_track = st.checkbox("Enable Live Location Tracking", value=st.session_state.live_tracking)
@@ -149,7 +149,6 @@ if live_track:
             if coords and idx < len(coords):
                 new_lon, new_lat = coords[idx]
                 engine.update_location(d.id, new_lat, new_lon)
-                # Increment index to move to the next coordinate point
                 st.session_state.route_index += 1
         else:
             # Random drift for unassigned drivers
@@ -157,11 +156,12 @@ if live_track:
             new_lon = d.location[1] + random.uniform(-0.0005, 0.0005)
             engine.update_location(d.id, new_lat, new_lon)
 
-    # Move passenger slightly
+    # Move passenger continuously to simulate GPS shifts / walking
     if st.session_state.passenger:
         p = st.session_state.passenger
-        new_p_lat = p.location[0] + random.uniform(-0.0001, 0.0001)
-        new_p_lon = p.location[1] + random.uniform(-0.0001, 0.0001)
+        # Slightly larger drift so the user movement is clearly visible
+        new_p_lat = p.location[0] + random.uniform(-0.0002, 0.0002)
+        new_p_lon = p.location[1] + random.uniform(-0.0002, 0.0002)
         p.update_location(new_p_lat, new_p_lon)
 
 
@@ -172,6 +172,7 @@ driver_data = []
 user_data = []
 route_path = []
 
+# Prepare Driver Icons
 for d in engine.drivers.values():
     driver_data.append({
         "lat": d.location[0],
@@ -184,23 +185,26 @@ for d in engine.drivers.values():
         }
     })
 
+# Prepare Passenger Icon (ALWAYS VISIBLE NOW)
+# If tracking has started, use live location. Otherwise, use input location.
+current_p_lat = st.session_state.passenger.location[0] if st.session_state.passenger else pickup_lat
+current_p_lon = st.session_state.passenger.location[1] if st.session_state.passenger else pickup_lon
+
+user_data.append({
+    "lat": current_p_lat,
+    "lon": current_p_lon,
+    "icon_data": {
+        "url": "https://cdn-icons-png.flaticon.com/512/149/149071.png",
+        "width": 128,
+        "height": 128,
+        "anchorY": 128,
+    }
+})
+
 # -------------------------
 # IF RIDE ASSIGNED
 # -------------------------
 if st.session_state.best_driver and st.session_state.passenger:
-
-    p = st.session_state.passenger
-    user_data.append({
-        "lat": p.location[0],
-        "lon": p.location[1],
-        "icon_data": {
-            "url": "https://cdn-icons-png.flaticon.com/512/149/149071.png",
-            "width": 128,
-            "height": 128,
-            "anchorY": 128,
-        }
-    })
-
     # Draw the remaining route on the map
     if st.session_state.route_coords:
         remaining_route = st.session_state.route_coords[st.session_state.route_index:]
@@ -243,13 +247,10 @@ route_layer = pdk.Layer(
     get_color=[255, 0, 0],
 )
 
-# Dynamically set viewstate to passenger if tracking, else default pickup
-center_lat = st.session_state.passenger.location[0] if st.session_state.passenger else pickup_lat
-center_lon = st.session_state.passenger.location[1] if st.session_state.passenger else pickup_lon
-
+# Center the map dynamically
 view_state = pdk.ViewState(
-    latitude=center_lat,
-    longitude=center_lon,
+    latitude=current_p_lat,
+    longitude=current_p_lon,
     zoom=13,
 )
 
@@ -271,9 +272,8 @@ if st.session_state.message:
 
 
 # -------------------------
-# THE FIX: LOOP RERUN
+# LOOP RERUN FOR MOVEMENT
 # -------------------------
-# By putting this at the very end, the map draws FIRST, then waits, then reruns.
 if st.session_state.live_tracking:
     time.sleep(0.5) 
     st.rerun()
