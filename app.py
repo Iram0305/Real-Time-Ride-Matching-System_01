@@ -256,7 +256,7 @@ view_state = pdk.ViewState(
 deck = pdk.Deck(
     layers=[driver_layer, user_layer, route_layer],
     initial_view_state=view_state,
-    map_style="mapbox://styles/mapbox/dark-v10"
+    map_style="road"
 )
 
 st.subheader("Live Road Map")
