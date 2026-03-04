@@ -133,7 +133,7 @@ if st.button("Request Ride"):
 
 
 # -------------------------
-# LIVE TRACKING LOGIC
+# LIVE TRACKING LOGIC (Math Only)
 # -------------------------
 st.subheader("Live Tracking Controls")
 live_track = st.checkbox("Enable Live Location Tracking", value=st.session_state.live_tracking)
@@ -149,23 +149,20 @@ if live_track:
             if coords and idx < len(coords):
                 new_lon, new_lat = coords[idx]
                 engine.update_location(d.id, new_lat, new_lon)
+                # Increment index to move to the next coordinate point
                 st.session_state.route_index += 1
         else:
-            # Random drift for unassigned drivers to simulate driving around
+            # Random drift for unassigned drivers
             new_lat = d.location[0] + random.uniform(-0.0005, 0.0005)
             new_lon = d.location[1] + random.uniform(-0.0005, 0.0005)
             engine.update_location(d.id, new_lat, new_lon)
 
-    # Move passenger slightly to simulate mobile GPS tracking
+    # Move passenger slightly
     if st.session_state.passenger:
         p = st.session_state.passenger
         new_p_lat = p.location[0] + random.uniform(-0.0001, 0.0001)
         new_p_lon = p.location[1] + random.uniform(-0.0001, 0.0001)
         p.update_location(new_p_lat, new_p_lon)
-
-    # Pause briefly and auto-refresh the app
-    time.sleep(1)
-    st.rerun()
 
 
 # -------------------------
@@ -271,3 +268,12 @@ st.pydeck_chart(deck)
 # -------------------------
 if st.session_state.message:
     st.success(st.session_state.message)
+
+
+# -------------------------
+# THE FIX: LOOP RERUN
+# -------------------------
+# By putting this at the very end, the map draws FIRST, then waits, then reruns.
+if st.session_state.live_tracking:
+    time.sleep(0.5) 
+    st.rerun()
