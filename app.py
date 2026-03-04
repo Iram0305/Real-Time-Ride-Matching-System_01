@@ -128,9 +128,9 @@ def get_road_route(start, end):
 st.write("🚕 **Step 2: Request a Ride**")
 user_id = st.text_input("Enter User ID", value="User_1")
 
-# Inputs default to the live location we fetched above
-pickup_lat = st.number_input("Pickup Latitude", value=st.session_state.center_lat, format="%.6f")
-pickup_lon = st.number_input("Pickup Longitude", value=st.session_state.center_lon, format="%.6f")
+# Automatically pull from the live GPS fetch (or defaults if not fetched yet)
+pickup_lat = st.session_state.center_lat
+pickup_lon = st.session_state.center_lon
 
 if st.button("Request Ride"):
     passenger = Passenger(user_id, pickup_lat, pickup_lon)
@@ -290,4 +290,3 @@ if st.session_state.message:
 if st.session_state.live_tracking:
     time.sleep(0.5) 
     st.rerun()
-    
