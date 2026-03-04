@@ -15,3 +15,6 @@ class Passenger:
     def __init__(self, pid, x, y):
         self.id = pid
         self.location = (x, y)
+        
+    def update_location(self, x, y):
+        self.location = (x, y)
